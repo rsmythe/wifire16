@@ -11,9 +11,11 @@
 
 // the timer object
 SimpleTimer timer;
+const unsigned int SIGNAL_HOLD = 500;
 
-char serialIn;
+byte serialData = 0;
 byte r1 = 0, r2 = 0;
+unsigned int timers[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 // setup
 void setup() {
@@ -49,13 +51,13 @@ void loop()
 {
     if(Serial.available()) 
     {
-        c = Serial.read();
+        serialData = Serial.read();
 
-        if( (c >= 0) && (c <= 0x0f) ) 
+        if( (serialData >= 0) && (serialData <= 0x0f) ) 
         {
-            activateChannel();
+            activateChannel(serialData);
         }
-        else if(c == '?')
+        else if(serialData == '?')
         {
             // load power on = low, off = high
             digitalRead(ARMEDPIN) ? Serial.print("-") : Serial.print("+");
@@ -65,41 +67,73 @@ void loop()
     timer.run();
 }
 
-void activateChannel(byte channel)
+bool isChannelActive(const byte channel)
 {
-    if(channel > 7) 
-    {
-      bitSet(r2,channel-8);
-    }
-    else 
-    {
-      bitSet(r1,channel);
-    }
+	if (channel > 7)
+	{
+		return bitRead(r2, channel - 8) > 0;
+	}
+	else
+	{
+		return bitRead(r1, channel) > 0;
+	}
 }
 
-void deactivateChannel(byte channel)
+void activateChannel(const byte channel)
 {
-    if(c > 7) 
-    {
-      bitClear(r2,c-8);
-    }
-    else 
-    {
-      bitClear(r1,c);
-    }
+	if (!isChannelActive(channel))
+	{
+		if (channel > 7)
+		{
+			bitSet(r2, channel - 8);
+		}
+		else
+		{
+			bitSet(r1, channel);
+		}
+
+		transmit();
+		setTimer(channel);
+	}
+	else
+	{
+		timer.restartTimer(timers[channel]);
+	}
 }
 
-void setTimer(byte r, byte channel)
+void deactivateChannel()
 {
-    timer.setTimeout(200, deactivateChannel);
+	for (int channel = 0; channel <= 15; ++channel)
+	{
+		unsigned int timerId = timers[channel];
+		if (isChannelActive(channel) && !timer.isEnabled(timerId))
+		{
+			if (channel > 7)
+			{
+				bitClear(r2, channel - 8);
+			}
+			else
+			{
+				bitClear(r1, channel);
+			}
+
+			transmit();
+		}
+	}
+}
+
+void setTimer(byte channel)
+{
+    int timerId = timer.setTimeout(SIGNAL_HOLD, deactivateChannel);
+	timers[channel] = timerId;
 }
 
 void transmit()
 {
     digitalWrite(LATCHPIN, LOW);
     digitalWrite(OEPIN, HIGH);
-    c = SPI.transfer(r1);
-    c = SPI.transfer(r2);
+    SPI.transfer(r1);
+    SPI.transfer(r2);
     digitalWrite(LATCHPIN, HIGH);
     digitalWrite(OEPIN, LOW);    
 }
